@@ -1,0 +1,806 @@
+---
+title: "New York City Parking Violation Analysis"
+author: 4 Boroughs- Leela Sai Mounika Bandaru, Shruti Chandra,Nishith Varma Penumatsa,Sai
+  Jai Krishna Ankith Srungarapu
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  word_document:
+    toc: yes
+  html_document:
+    theme: flatly
+    toc: yes
+    toc_float: yes
+    code_download: yes
+editor_options:
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE, cache = F}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  error = TRUE,
+  warning= FALSE,
+  message= FALSE)
+```
+## 1.Introduction
+Parking violations are a continual presence and source of annoyance in the lives of many residents of large modern cities, especially New York city. They can also be an important source of revenue for cities in the 2017 fiscal year. Parking disorderly not only brings inconvenience to traffic flow but also has a negative impact on the image of the city.
+
+Especially with on-street parking relatively difficult to find in certain districts in the City, tickets can make commuting or performing errands by car particularly burdensome, restricting the hours and locations that parking is available; New York Cites weekly alternate side parking policies for street cleaning sometimes lead apartment building doormen to temporarily double-park groups of residents’ cars on the opposite side of the street to avoid tickets. They can also be an important source of revenue for cities.
+
+## Research Questions:
+Our research is to evaluate several factors that are associated with the violations that happened in New York City parking ticket data and to determine if parking violations are more likely to occur on specific times, to identify which precincts has a greater number of violations.
+
+## Why this dataset?
+From our analysis on this data, we would produce improvements for pedestrians, vehicular safety through education and a timely decision of parking, and traffic violations. Further,it would help the government to resolve violation issues in a systematic manner. We have used RStudio, spark to analyze the statistical data of the violation rate and visualize on various aspects to give the insight of parking violations.
+
+## Dataset Information
+The first data set used in the analysis consists all set of 10M parking ticket violations issued in New York City in 2017; each observation comprises one ticket issued. The other data set consists of 63M records and 19 Variables, this data file contains open parking and camera violations issued by the city of New York for different states. The NYC department of finance collects data on every parking ticket issued in NYC (~10M per year!). The Department of Finance is responsible for collecting and processing payments for all parking tickets and camera violations. This data set gives an insight on ticket resolution and to guide policymakers. 
+([NYC parking tickets](https://www.kaggle.com/new-york-city/nyc-parking-tickets))
+([Open parking and camera violations](https://data.cityofnewyork.us/City-Government/Open-Parking-and-Camera-Violations/nc67))
+
+### Libraries
+Below are all the libraries and data frames used for the project. Code for lower casing the column names has also been shown. We used inner join to join a new table to the original data set containing violation charges and description. We have also converted the df_join dataframe into a tibble as it was required for converting column to row in the following code for clustering.
+```{r}
+library(tidyverse)
+library(RColorBrewer)
+library(scales)
+```
+### Importing datasets
+```{r}
+pvi <- read_csv("Parking_Violations_Issued_2017.csv")
+```
+## 2.Body
+Working with the large data set regardless of the software can cause problems during the execution. So we are considering the sample of data set.we have applied random sampling to our datasets.
+```{r}
+pvi_sd <- pvi %>% sample_n(500001, replace = FALSE) #Sampling the data
+```
+## Data Tidying
+We had the last column in our open parking and camera violation table that contained the image of the summon issued to every person. Also, there are other columns like meter number,Issuer squad, sub division etc and the images of the summon are not going to be of any use in the analysis we decided to get rid of it and that was the only consolidation we did.
+```{r}
+## Removing columns that are not required
+pvi_sd <- select(pvi_sd,1:9,15,17,22,25,34,36,40,16,20)
+```
+we are changing the column names in the original dataset to lowercase as the usage of column names will be easy during analysis.  
+```{r}
+pvi_sd <- pvi_sd %>% select_all(~gsub("\\s+|\\.", "_", .)) %>% select_all(tolower)
+```
+We want to separate issue date column into individual as the analysis we want to perform based on the day of violation issued.
+```{r}
+pvi_sd<- separate(pvi_sd, issue_date, c("month", "day","year"))# split issue_date into MDY format
+pvi_sd$month <- as.integer(pvi_sd$month)
+pvi_sd$day <- as.integer(pvi_sd$day)
+pvi_sd$year <- as.integer(pvi_sd$year)
+```
+## Visualizations
+
+We have created visualizations for the variables in the dataset that we are considering that will impact parking violations in NYC.Now, we want to know how the following variables ticket issued day,year,vehicle body type and vehicle make variables impact parking violation and then vioaltions by violation counties and their impact. 
+```{r}
+## Number of parking Violations Issued by Vehicle Make
+by_vehiclemake <- pvi_sd %>% group_by(violation_county,vehicle_make) %>%
+                              summarise(count = n()) %>%
+                              arrange(desc(count)) %>%
+                              slice(1:10) 
+ggplot(data = by_vehiclemake, aes(x = vehicle_make, y = count, fill = vehicle_make)) +
+  geom_histogram(stat = "identity") +
+  ggtitle("Parking Violations Issued by Vehicle Make") +
+  theme(axis.text.x = element_text(angle = 45))
+```
+## Observation 
+From the chart, we can observe that the Vehicle make "Ford" has the most number of tickets issued with almost 50k tickets while Acura has the least number of tickets issued within the range of hundred tickets.
+```{r}
+## Number of parking Violations Issued by Vehicle Body type
+by_vehiclebodytype <- pvi_sd %>% group_by(violation_county,vehicle_body_type) %>%
+                              summarise(count = n()) %>%
+                              arrange(desc(count)) %>%
+                              slice(1:10) 
+ggplot(data = by_vehiclebodytype, aes(x = vehicle_body_type, y = count, fill = vehicle_body_type)) +
+geom_histogram(stat = "identity") +
+ggtitle("violations by vehicle body") +
+  theme(axis.text.x = element_text(angle = 50))
+```
+## Observation 
+From the chart, we can observe that the Vehicle body type  "SUBN" has the most number of tickets issued with almost 50k tickets while Acura has the least number of tickets issued within the range of hundred tickets.
+
+In the following analysis, we are considering only Boroughs of NYC which means the main 5 cities in NYC such as Bronx(BX),Manhattan(MN),Queens(Q),Staten Island(SI),Brooklyn(BK) as they are the busiest cities.Now lets find out which city has highest number of violations.
+```{r}
+## parking Violations by  Borough
+ggplot(pvi_sd,aes(x=violation_county,fill=violation_county)) + 
+geom_bar() + 
+ggtitle('Parking Violations Issued by Borough') +
+xlab('Borough') + ylab('Number of tickets') +
+scale_x_discrete(limits=c("MN","BK","BX","Q","ST"))+
+scale_y_continuous(labels=comma)+
+scale_fill_brewer(palette = "Set2")+
+theme(legend.position = 'none')
+```
+## Observation
+From the output, we can see that "Queens" city has the most number of violations compared to other cities followed by Bronx.Also the least number of violations in Manhattan.The output might be surprising because Manhattan got the least as we can say people there use public transport more than own cars.
+
+As we observed from the above output, "Queens" has more number of violations, lets get into deep observation and find out what are the most violations(there are various violation codes upto 99 in the data set , so considering top 10 would be more visually appealing)issued in Queens.
+```{r}
+## Top 10 violation codes issued in Queens
+Queens <- pvi_sd %>% filter(violation_county=="Q")
+Top10Violations <- group_by(Queens,violation_code) %>%
+                            summarise(count = n()) %>%
+                            arrange(desc(count)) %>%
+                            slice(1:10) 
+ggplot(data = Top10Violations, aes(x = violation_code, y = count, 
+                                   fill = violation_code)) +
+  geom_histogram(stat = "identity") +
+  ggtitle("Top 10 Violations in Queens") +
+  theme_grey()
+```
+## Observation
+From the output we can say that the most violation code issued in Queens was code 20 (NO PARKING-DAY/TIME LIMITS) and code 40 (FIRE HYDRANT).
+
+we found out what violation codes most occurred and now lets figure out which months the tickets are issued most in Queens.
+```{r}
+## Number of parking Violations based on day in Queens
+by_dates <- pvi_sd %>% 
+              group_by(violation_county,day) %>%
+              summarise(count= n()) %>%
+              arrange(desc(count)) %>% 
+              slice(1:10)
+ggplot(data = by_dates, aes(x = day, y = count, 
+                                fill=day)) +
+  geom_histogram(stat = "identity") +
+  ggtitle("ticket issuance by day") +
+  theme_grey()
+```
+## Observation
+From the output we can say that at the violations are more initially at first weekend and then reduced and again increased in the middle.This can explain us there is lot of fluctuation in the tickets issued on each and every day.
+```{r}
+## Number of parking Violations based on month in Queens
+by_dates <- pvi_sd %>% 
+              group_by(violation_county,month) %>%
+              summarise(count= n()) %>%
+              arrange(desc(count)) %>% 
+              slice(1:10)
+ggplot(by_dates,aes(month,count))+
+ggtitle(' month for ticket issuance')+
+geom_bar(stat = "identity", fill = rainbow(n=length(by_dates$count)))
+```
+## Observation
+From the output we can say that for the months May and June tickets issued are around 50k and the least tickets issued is in July which is around 200.This make sense because in summer people try to be outside rather than in Febrauary.
+
+## Most number of parking violations grouped by streets in Queens county. we are just focusing on Queens county because initially that city got the most parking violations and we are trying to figure out the reason why it is high in Queens.
+```{r}
+by_street <- count(Queens,street_name) %>% 
+             arrange(desc(n))
+## Top streets in Queens county with most number of parking violations
+by_street_head <- head(by_street,6)
+## Visualizing streets in Queens county
+ggplot(by_street_head,aes(street_name,n))+
+ggtitle('Top streets for ticket issuance in Queens')+
+geom_bar(stat = "identity", fill = rainbow(n=length(by_street_head$n)))+
+theme(axis.text.x = element_text(angle = 20))
+```
+## Observation
+From the Bar Chart, we can observe that Queens Blvd had highest violations recorded with 2500 tickets within Queens and Steinway street is the least violations with around 900 tickets.
+
+## Determining most frequent Parking Violation at specific times (AM/PM)
+Created a variable, to find out the top 3 violation codes that have occurred most frequently. Used group by for grouping violation codes, and then summarize for counting the occurrences, arrange for descending order of display.
+
+Below, 3 columns were created using Mutate function in a dataframe df_VC. Str_sub was used to return strings from 1 to 4 and the last string from Violation Time column. They were stored in Two separate columns for the Hours and AM/PM i.e. ViolationTime and TimeRange. And, a new column for assigning a TimeRange to the specific violation times as they were given in HHMM format, so that they can be shown clearly on the plot.Then, they were grouped by Violation Code, ViolationTime and TimeRange, counted by Violation Code using Summarise, arranged in descending order, and filtered by the top 3 Violation Codes for making the Bar Plot.
+```{r}
+df_vc<-pvi_sd %>% mutate(pvi_sd, ViolationTime=str_sub("violation_time", -1),                 ViolationHours=str_sub('violation_time', 1, 4),   
+             TimeRange=case_when(
+                                 between(ViolationHours, 0000, 0200)  ~ "12-2",
+                                 between(ViolationHours, 0200, 0400) ~ "2-4",
+                                 between(ViolationHours, 0400, 0600) ~ "4-6",
+                                 between(ViolationHours, 0600, 0800) ~ "6-8",
+                                 between(ViolationHours, 0800, 1000) ~ "8-10",
+                                 between(ViolationHours, 1000, 1200) ~ "10-12",
+                                 between(ViolationHours, 1200, 1259) ~ "12-2" )) %>% 
+  group_by('violation_code', ViolationTime, TimeRange) %>% 
+  summarise(count=n()) %>% 
+  arrange(desc(count)) %>% 
+  filter('violation_code'== 36 |'violation_code'== 21 |'violation_code'== 38)
+df_vc ## Viewing the table
+```
+The Top 3 most frequently occurring Violation Codes were 21, 36 and 38. VC 21 occurred 70,656 times, VC 36 occurred 64944 times, VC 38 occurred 49102 times.VC 21 means Street Cleaning: No parking where parking is not allowed by sign, street marking or traffic control device. Whereas, VC 36 is: exceeding the posted speed limit in or near a designated school zone.VC 38 is when one fails to show a receipt or tag in the windshield given by the Parking Meter.
+
+Below, a Grouped Bar Chart was created using ggplot geom_bar to show the difference between the count of the Top 3 Violation Codes by AM/PM.Aesthetics used were Violation Code and the grouped bars are filled by Violation Time as AM or PM.It was colored red and blue using scale_fill. Gg_title was used to give title to the graph.Facet_wrap was used to show top 3 Violation Codes in separate grids alongside.
+
+```{r}
+ggplot(df_vc,aes(x='violation_code', y=count, fill=ViolationTime))+
+    geom_bar(stat="identity", position = "dodge") + 
+    scale_fill_brewer(palette = "Set1")+
+    ggtitle("Violation Times in AM & PM")+
+    facet_wrap(~'violation_code')+
+    geom_smooth(size=2)
+
+```
+## Observation
+VC 21 has higher occurrences in the AM hours as compared to its PM occurrences. For VC 36, the occurrences in both AM and PM are about the same. As for VC 38, AM occurrences are slightly higher than PM.
+
+Below, a Grouped bar chart was created using ggplot geom_bar to show the VC codes 21, 36, 38, by Time Range and Count and by AM and PM. Aesthetics used were TimeRange and it was filled by AM or PM. Geom_Smooth was used to draw a line through the data, however, being in different grids that could not be shown. It was colored using scale_fill. gg_title was used to give title to the graph.Facet_wrap was used to show top 3 Violation Codes in separate grids alongside.
+
+## Conclusions
+
+a.From the analysis, we can conclude that all the variables taken such as Violation code in particular Standing Zone , New York county from Violation County,5th   May 2017 from  Issue Date, and Vehicle make Ford had major impact on  the parking violation issued in New York city when compared to other variables.Hence, we   can say that in every way possible violations are more and thus increasing the revenue for the cities by paying through violation payment. 
+
+b. We also observed that certain precincts/streets/locations had more number of violations. By knowing that, authorities can identify the reasons for the high number of violations there and curb them depending upon the reasons.
+
+c.In Fig 11 observed, Violation Code 21, 36 and 38 are the most frequently occurring violations.Drivers get a 5-minute grace period past the expired time on parking meter receipts. Given the time(hours) of occurrences, the authorities can identify the time of the day when these violations are higher. For e.g. it was observed that VC 21 occurred mainly during office hours 8AM to 10AM, when people are in a rush to find a parking spot and park where it is not allowed. They can come up with discounts if one parks before 8AM. For VC 36, most speeding occurred during the school hours, here, they can then come up with measures like  having speed breakers to lower the vehicle speeds or deploying traffic policemen near areas like school zones where exceeding speed limits can by highly dangerous. As for the VC 38, which occurs throughout the day and frequently, higher charges can be fined to the defaulters to prevent people from not showing    parking tickets.([linked phrase](https://www1.nyc.gov/site/finance/vehicles/services-violation-codes.page))
+
+d.Our team have come to following conclusions based on our initial analysis of our Newyork parking violations data.
+1.Initially, we focused on the variables like vehicle make, vehicle body type and cities    that have impact on parking tickets. From our analysis, we can conclude that there is huge  violation issued based on vehicle make compared to other variables taken. At the same time, we can conclude that Queens is the most violations issued city among Borough.
+2.After finding the city with most violations, we focused to do our analysis on variables which can lead us in details about Queens county. From the analysis, we can conclude that 
+two violations are more often such as NO PARKING-DAY/TIME LIMITS and fire hydrant in May and June especially in the street of Queen Blvd.
+
+## Summary of the changes in part1
+We have done changes to our project part1 from professors feedback. The following are the changes:
+1. we have added two more new dataset for performing analysis using modeling techniques.
+2. Made sure that we remove warnings whilw we knit the file.
+3. Explaining each and every line of code as much as possible
+4. legend of the charts and color was changed 
+5. We changed few research questions and now they are related to each other so we tried to perform better in story telling this time.
+6. We tried to apply this now  to remove Grammatical and case sensitive errors.
+7. Overall, we tried to apply each and every suggestion professor gave us on part1 and part2.
+
+## Project part-2
+## Libraries
+Below are the libraries and data frames used for the project. Code for lower casing the column names has also been shown. We used inner join to join a new table to the original data set containing violation charges and description. We have also converted the df_join dataframe into a tibble as it was required for converting column to row in the following code for clustering.
+```{r}
+library(sparklyr)
+library(corrr)
+library(dbplot)
+library(cluster)
+library(factoextra)
+library(modelr)     # provides easy pipeline modeling functions
+library(broom)      # helps to tidy up model outputs
+library(gridExtra)
+library(kernlab)      # SVM methodology
+library(e1071)        # SVM methodology
+library(ISLR)         # contains example data set "Khan"
+```
+sc <- spark_connect(master = "local", version = "2.3")
+pv_csv_data<-spark_read_csv(sc, "parking_violations1.csv")
+vc_csv_data<-spark_read_csv(sc, "violation_charges2.csv")
+pv_lower<-rename_with(pv_csv_data1, tolower) ##lower-casing the column names
+df_join<-sparklyr::inner_join(pv_lower, vc_csv_data, by="violation_code")
+df_tibble<-as_tibble(df_join) ## converted to tibble as it was not visible
+```
+#K-Means Clustering
+
+Goal: We use the K-Means Clustering method to classify and identify the counties which generate higher or lower average and total charges. This will also help understand the concentration of parking violations county-wise. Below, a new column is created to replace the existing N/A values with the more machine compatible NA in the violation charge column and then it has been converted to integer data type. 
+
+```{r}
+df_tidy<-df_tibble %>% 
+  mutate(violation_charge=ifelse(violation_charge=="N/A", NA, violation_charge)) %>% 
+  mutate(violation_charge=as.integer(violation_charge))
+```
+
+After that, in df_cluster dataframe, we grouped by violation county and two columns for average violation charge and total charges for each county has been created and then the violation county has been converted from column to row names.
+
+```{r}
+df_cluster<-df_tidy %>% 
+  group_by(violation_county) %>% 
+  summarize(avg_charge=mean(violation_charge, na.rm=T), total_charges=n()) %>% 
+  column_to_rownames(var="violation_county")
+```
+
+Below, we use the R scale function to standardize the variables, and we also create a distance matrix for visualizing the counties with similar average and total charges using the functions *get_dist* and *fviz_dist*.
+In the distance matrix, we can see that the counties are differentiated on the basis of their characteristics of high and low violation charges and have been grouped with the same color. As for the gradient, it shows the density or concentration depending on the value of charges.Counties with similar characteristics follow the same color code.
+
+```{r}
+df_scale<-df_cluster %>% scale() 
+
+distance<-get_dist(df_scale)
+fviz_dist(distance, gradient = list(low = "#00AFBB", mid = "white", high = "#FC4E07"))
+
+```
+
+Then, we create clusters with different k values and visualize them in a grid to see which clusters look relevant and to get an idea as to how many clusters would be appropriate. By looking at these clusters we see that the plot with two clusters seems the most appropriate one as it is clustering all the counties into two separate distinguished clusters as compared to the others which are showing individual counties in silos. 
+
+```{r}
+k2 <- kmeans(df_scale, centers = 2, nstart = 25) 
+k3 <- kmeans(df_scale, centers = 3, nstart = 25)
+k4 <- kmeans(df_scale, centers = 4, nstart = 25)
+k5 <- kmeans(df_scale, centers = 5, nstart = 25)
+
+p1 <- fviz_cluster(k2, geom = "point",  data = df_scale) + ggtitle("k = 2")
+p2 <- fviz_cluster(k3, geom = "point",  data = df_scale) + ggtitle("k = 3")
+p3 <- fviz_cluster(k4, geom = "point",  data = df_scale) + ggtitle("k = 4")
+p4 <- fviz_cluster(k5, geom = "point",  data = df_scale) + ggtitle("k = 5")
+
+grid.arrange(p1, p2, p3, p4, nrow = 2)
+```
+
+In the below code, we use the elbow, silhouette and the gap statistic methods to determine the optimal number of clusters that would be suitable for our data set. Looking at the plots, we can safely say that there are two possible clusters in which we can group our variables as we could see in the distance matrix. So, we finalize taking k = 2 clusters for our data.
+
+```{r}
+set.seed(1234)
+
+# function to compute total within-cluster sum of square 
+wss <- function(k) {
+  kmeans(df_scale, k, nstart = 2 )$tot.withinss
+}
+
+##Elbow method
+
+set.seed(1234)
+fviz_nbclust(df_scale, FUNcluster= kmeans, method = "wss", k.max = 5) 
+
+##Average Silhouette    
+
+fviz_nbclust(df_scale, kmeans, method = "silhouette", k.max=5) 
+
+##Gap statistic
+set.seed(1234)
+gap_stat <- clusGap(df_scale, FUN = kmeans, nstart = 25,
+                    K.max = 5, B = 50)
+
+print(gap_stat, method = "firstmax")
+fviz_gap_stat(gap_stat)
+```
+
+After finalizing the number of cluster,we run the final cluster with k = 2.
+
+```{r}
+##K-means clustering with k = 2
+
+str(k2)
+tidy(k2)
+fviz_cluster(k2, data = df_scale) 
+
+```
+Observation: The counties in the orange cluster: New York, Kings, Queens and Bronx generate the highest charges/revenue. Whereas, the counties in the Blue cluster: Brooklyn, Staten Island, Richmond, Manhattan generate the lowest charges/revenue. 
+
+In the above clusters, we observe that the Manhattan county, is shown in the cluster low number of violation and lower average charges, however, this county is the most densely populated of the five boroughs of New York. So to further understand it, we conducted a Support Vector Machine classification of the counties into precincts to figure if any precincts affected the clustering.
+
+#Support Vector Machine
+
+Goal: Classifying Violation Precincts based on the average charges and total number of charges/violations using Support Vector Machine method. Classes have been divided as high violation precincts and low violation precincts. Classifying and identifying precincts can help the authorities pinpoint the causes for high violation and implement measures to control them.
+
+In the below code, we have aggregated violation precincts on the basis of average violation charges and total number of charges.
+```{r}
+df_svm<-df_tidy %>% 
+group_by(violation_precinct) %>% 
+summarize(avg_charge=mean(violation_charge, na.rm=TRUE), total_charges=n())
+```
+Then we classified the precincts data based on the high and low average charges on the basis of observations in cluster analysis.
+
+```{r}
+df_svm_class<- df_svm %>%
+mutate(df_svm,violation_class=ifelse(total_charges > 3000, 1 , -1)) %>%
+column_to_rownames(var="violation_precinct")
+```
+The following ggplot was used for visualizing the data before doing an SVM fit plot.
+
+```{r}
+df_svm_class %>% 
+ggplot(mapping=aes(x=avg_charge, y=total_charges, color = violation_class))+
+geom_point()
+```
+
+Now, we use the SVM model to classify the violation classes based on the classes identified above. Thereafter, we tried to plot the SVM model.
+```{r}
+# Fit Support Vector Machine model to data set
+svmfit <- svm(violation_class~., data = df_svm_class, kernel = "linear", scale = FALSE)
+
+# Plot Results
+plot(svmfit, data = df_svm_1, violation_class~.)
+```
+Note:The svmfit model plot was executing without error, however it was not showing a plot due to possible issues with the package as noted in the doubt session. Therefore the below kernfit plot was used.
+
+```{r}
+
+# fit model and produce plot
+kernfit <- ksvm(x = violation_class~., data = df_svm_class, type = "C-svc", kernel = 'vanilladot')
+
+# Plot Results
+plot(kernfit, data = df_svm_class)
+```
+Observation: We observe that the average charges and total number of violations may appear higher due to the higher charges and violations in some of the precincts. The plot exhibits that with the dots towards the right with darker gradient. Classifying and identifying precincts can help the authorities pinpoint the causes for high violation and implement measures to control them in the respective highly impacted precincts.
+
+Limitation: Lack of numeric variables; difficult to identify classes based on these variables.
+
+#Linear Regression
+
+Goal: To analyze the trend of the number of violations on different times of the year to identify the peaks and minimizing the number of violations.
+
+Below, we aggregate the data by issue date to identify number of violation and total charges applied on a particular day.
+```{r}
+set.seed(123)
+
+df_regression<-df_tidy %>% 
+  group_by(issue_date) %>% 
+  summarize(sum_charges=sum(violation_charge, na.rm=T), no_of_violations=n()) %>% 
+  column_to_rownames(var="issue_date")
+```
+
+Below, we divided the dataset into training and test data by 60% and 40% respectively.
+```{r}
+sample <- sample(c(TRUE, FALSE), nrow(df_regression), replace = T, prob = c(0.6,0.4))
+train <- df_regression[sample, ]
+test <- df_regression[!sample, ]
+```
+
+A linear regression model was created using training data with number of violations as the independent variable and sum of charges as the dependent variable.
+```{r}
+model1 <- lm(sum_charges ~ no_of_violations , data = train) #model building
+```
+
+Then, we run the summary on the model as below.
+```{r}
+summary(model1) #model output and accuracy
+confint(model1) #assessing coefficients
+```
+Observation:
+
+Since P value < α (0.05), total charges in a county are dependent on the number of violations. In counties where total charges in a day are higher than that in the other counties, if the charges are increased by a minimal percentage, say 10%, the total revenue from parking ticket violations will increase substantially and in a shorter time frame than compared with the counties having lesser number of violations. Increasing violation charge rate may also be used to reduce the number of violations in those counties.
+
+The coefficients indicates that with 95% level of significance the value of the sum of charges may increase between $64+$6.4 = $70.4(10% increase) to $66+$6.6=$72.6(10% increase) if the violation charges are increased by 10%. So, we can say that there is definitely a positive relationship between the number of violations and the total charges.
+
+The Residual Standard Error indicates that the total charges will deviate from the true regression line by approximately 2136 units. 
+
+The R Squared result suggests that our model with 1 predictor can explain 99% of the variability in our parking violation charges data. R Square value is 0.9916 and the adjusted R2 value is 0.9915. Since we do not have much difference between the two values and also since we have only one predictor variable, we say that the predictor variable is relevant and the complexity is justified.
+
+Since our F statistic is greater than 1 and the p-value P < α (0.05) is significant, we can say that our model is a good fit and number of violations is a significant predictor of violation charges.
+
+Based on the above, the residuals vs fitted plot was drawn on model 1 data which shows number of charges and their sum distributed across the days in the year.
+```{r}
+
+model1_results <- augment(model1, train) %>%
+  mutate(Model = "Model 1")# add model diagnostics to our training data
+
+ggplot(model1_results, aes(.fitted, .resid))+ 
+  geom_point()+
+  stat_smooth(method="loess")+
+  geom_hline(yintercept=0, col="red", linetype="dashed")+
+  xlab("Fitted values")+
+  ylab("Residuals")+
+  ggtitle("Residual vs Fitted Plot")+
+  theme_bw()
+
+```
+## Final observation: 
+Analyzing the results from the clustering, svm and regression, we observed how counties fall in high violation and low violation classes; how precincts impact the classification of the counties in the categories, and; how total number of violations affect charges based on certain times in the year. Further deep diving into the analysis can help the authorities target those precincts given the times of the year when the violations were high implement measures like newspaper articles, TV campaign, town halls, increasing the charges etc. to minimize the number of violations in those precincts.
+
+## Data importing and Manipulations
+we are importing two other data sets that will be useful for performing modeling techniques because there are no enough numerical variables to perform clustering and regression analysis in the existing dataset.
+```{r}
+vc <- read.csv("violation_charges2.csv",stringsAsFactors = FALSE)
+df2 <- read.csv("Open_Parking_and_Camera_Violations.csv")
+df3 <- df2 %>%  sample_n(500001, replace = FALSE)
+df3<- df3[ -c(1,2,3,8,17,18,19)]
+df3 <- df3 %>%  
+       select_all(~gsub("\\s+|\\.", "_", .)) %>% 
+       select_all(tolower)
+colnames(df3)[4] <-"violation_description"
+colnames(df3)[11] <-"violation_county"
+```
+We are merging two datasets by violation county so that we can use the numerical variables such as payment amount, fine amount, interest amount etc in our joining. we are using merge function here.
+```{r}
+by_amount <- df3 %>% select(c(fine_amount,penalty_amount,reduction_amount,payment_amount,
+                            violation_county)) %>% 
+                            group_by(violation_county) %>% 
+                            summarise_all(mean)
+by_count <- df3 %>% group_by(violation_county) %>% 
+                    summarise(total_tickets = n())
+
+vc<- vc[ -c(3)]
+#merging by_amount and by_count dataframe
+final_df <- merge(by_amount,by_count)
+```
+### Requirements
+We will use New york Violations data, Violation charges and open parking and camera violations  provided by the NYC open data website. We will also use a few packages that provide data manipulation, visualization, pipeline modeling functions, and model output tidying functions.
+```{r}
+library(modelr)     # provides easy pipeline modeling functions
+library(broom)# helps to tidy up model outputs
+```
+### Data Preparation
+We will use a conventional 60% / 40% split where we training our model on 60% of the data and then test the model performance on 40% of the data that is withheld.
+```{r}
+set.seed(123)
+sample <- sample(c(TRUE, FALSE), nrow(final_df), replace = T, prob = c(0.6,0.4))
+train <- final_df[sample, ]
+test <-  final_df[!sample, ]
+```
+### Linear regression model
+```{r}
+model1 <- lm(payment_amount ~ fine_amount, data = train)
+```
+### Model1 output
+```{r}
+summary(model1)
+tidy(model1)
+```
+We can see from the summary of our models that our coefficient for fine amount and payment amounts are statistically significant (p-value < 0.05). Thus, we can say our model1 is significant model.
+
+In this case, one independent variable is significant and so we proceed to interpret its coefficient estimate (impact on the dependent variable). The fine amount coefficient suggests that for every dollar increase in fine amount, holding all other predictors constant, we can expect an increase of 0.16-0.77 units in payment amount, on average.
+
+### Assessing Coefficients for model1
+```{r}
+confint(model1)
+```
+Our results show us that our 95% confidence interval for β1 (fine amount) is[.12, .051]. Thus, since zero is not in this interval we can conclude that as the fine amount increases by dollar we can expect the sales to increase by  units.
+
+Thus, we can conclude that there is a positive relationship between fine amount and payment amount.
+
+### Assesing model accuracy
+In our summary print out above for model 1 we saw that F=21.37 with p<0.05 suggesting that our fine amount must  be related to payment amount.Combined, our RSE, R2, and F-statistic results suggest that our model has a good fit.
+
+### Assessing Our Model1 Visually
+The first plot you want to visualize is the residuals versus fitted values plot.
+ggplot(model1, aes(.fitted, .resid))+ 
+  geom_point()+
+  stat_smooth(method="loess")+
+  geom_hline(yintercept=0, col="red", linetype="dashed")+
+  xlab("Fitted values")+
+  ylab("Residuals")+
+  ggtitle("Residual vs Fitted Plot")+
+  theme_bw()
+
+The above plots enable us to analyze two important concerns (assumptions):
+
+Non-linearity: Our plot indicates that the assumption of linearity is fair for model 1,the line is almost flat over the 0.
+
+Heteroskedasticity: Our plot indicates that the assumption of Heteroskedasticity is fair for model1, is almost flat over the 0.
+
+## Correlation
+```{r}
+install.packages("ggcorrplot")
+
+library(ggcorrplot)
+
+c <- final_df %>% select(payment_amount,fine_amount,penalty_amount,
+                         reduction_amount,total_tickets)
+options(repr.plot.width=12, repr.plot.height=12)
+corr <- round(cor(c, use="complete.obs"), 2)
+ggcorrplot(corr, lab = TRUE,colors = c("aquamarine", "white", "dodgerblue"),
+           show.legend = F, outline.color = "gray", type = "upper",
+           tl.cex = 10, lab_size = 3, sig.level = .1) +
+           labs(fill = "Correlation")
+```
+
+
+### Multiple Regression Model 
+```{r}
+model2 <- lm(payment_amount ~ fine_amount + reduction_amount + penalty_amount, data = train)
+```
+### Model2 output:
+```{r}
+summary(model2)
+tidy(model2)
+```
+We can see from the summary of our models that our coefficients for fine amounts and reduction amounts with payment amount are statistically significant (p-value < 0.05) while the coefficients for penalty amount is not. Thus, changes in penalty do not appear to have a statistically significant relationship with changes in payment amount so no reason to interpret its estimate.
+
+In this case, two independent variables are significant and so we proceed to interpret its coefficient estimate (impact on the dependent variable). The fine amount coefficient suggests that for every dollar increase in fine amount, holding all other predictors constant, we can expect an increase of 1.4 units in payment amount, on average.
+
+The reduction amount coefficient suggests that for every dollar increase in reduction amount, holding all other predictors constant, we can expect an increase of 4.8 units in payment amount, on average.
+
+### Assessing Coefficients for model2
+```{r}
+confint(model2)
+```
+Our results show us that our 95% confidence interval for β1 (fine amount) is [.057, .236]. Thus, since zero is not in this interval we can conclude that as the fine amount increases by dollar we can expect the payment amount to increase by 0.5-2.3 units.
+Our results show us that our 95% confidence interval for β2 (reduction amount) is [.217, .748]. Thus, since zero is not in this interval we can conclude that as the reduction amount increases by dollar we can expect the payment to increase by 2.1-7.5 units.
+
+Thus, we can conclude that there is a positive relationship between fine amount and reduction amount with payment amount.
+
+### Assesing model2 accuracy
+In our summary print out above for model 2 we saw that F = 7.507 with p<0.05 suggesting that our fine amount, reduction amount and penalty amount must  be related to payment amount.Combined, our RSE, R2, and F-statistic results suggest that our model has a good fit.
+
+### Assessing Our Model2 Visually
+The first plot you want to visualize is the residuals versus fitted values plot.
+```{r}
+ggplot(model2, aes(.fitted, .resid))+ 
+  geom_point()+
+  stat_smooth(method="loess")+
+  geom_hline(yintercept=0, col="red", linetype="dashed")+
+  xlab("Fitted values")+
+  ylab("Residuals")+
+  ggtitle("Residual vs Fitted Plot")+
+  theme_bw()
+```
+The above plots enable us to analyze two important concerns (assumptions):
+
+Non-linearity: Our plot indicates that the assumption of linearity is not fair for model 2.
+
+Heteroskedasticity: Our plot indicates that there is a funnel shape with our residuals, as slightly in our plot, then we have violated the homoskedasticity assumption. Sometimes this can be resolved with a log or square root transformation of Y in our model.
+
+### Applying square root transformation for model2
+```{r}
+model2a <- lm(sqrt(payment_amount) ~ fine_amount + reduction_amount + penalty_amount, data = train)
+
+model1_results <- augment(model1, train)
+model2a_results <- augment(model2a, train)# add model diagnostics to our training data
+```
+#Assessing Our Model Visually
+```{r}
+ggplot(model2a_results, aes(.fitted, .resid)) +  
+  geom_point()+
+  stat_smooth(method="loess")+
+  geom_hline(yintercept=0, col="red", linetype="dashed")+
+  xlab("Fitted values")+
+  ylab("Residuals")+
+  ggtitle("Residual vs Fitted Plot")+
+  theme_bw()
+```
+The second is the scale-location plot. This plot shows if residuals are spread equally along the ranges of predictors. This provide you an alternative way to check the assumption of equal variance (homoscedasticity). It’s good if you see a horizontal line with equally (randomly) spread points.
+### Normality of the residuals for model1 and model2
+```{r}
+ggplot(model2a_results, aes(.fitted, sqrt(abs(.std.resid))))+
+  geom_point(na.rm=TRUE) +
+  stat_smooth(method="loess", na.rm = TRUE)+
+  xlab("Fitted Value")+
+  ylab(expression(sqrt("|Standardized residuals|")))+
+  ggtitle("Scale-Location")+
+  theme_bw()
+
+  ggplot(model1_results, aes(.fitted, sqrt(abs(.std.resid))))+
+  geom_point(na.rm=TRUE) +
+  stat_smooth(method="loess", na.rm = TRUE)+
+  xlab("Fitted Value")+
+  ylab(expression(sqrt("|Standardized residuals|")))+
+  ggtitle("Scale-Location")+
+  theme_bw()
+  
+  OR
+    p1 <- ggplot(model1_results, aes(.fitted, .std.resid)) +
+  geom_ref_line(h = 0) +
+  geom_point() +
+  geom_smooth(se = FALSE) +
+  ggtitle("Standardized Residuals vs Fitted")
+
+p2 <- ggplot(model1_results, aes(.fitted, sqrt(.std.resid))) +
+  geom_ref_line(h = 0) +
+  geom_point() +
+  geom_smooth(se = FALSE) +
+  ggtitle("Scale-Location")
+
+gridExtra::grid.arrange(p1, p2, nrow = 1)
+```
+
+
+```{r}
+p1_2 <- ggplot(model2a_results, aes(.fitted, .std.resid)) +
+  geom_ref_line(h = 0) +
+  geom_point() +
+  geom_smooth(se = FALSE) +
+  ggtitle("Standardized Residuals vs Fitted")
+
+p2_2 <- ggplot(model2a_results, aes(.fitted, sqrt(.std.resid))) +
+  geom_ref_line(h = 0) +
+  geom_point() +
+  geom_smooth(se = FALSE) +
+  ggtitle("Scale-Location")
+
+gridExtra::grid.arrange(p1_2, p2_2, nrow = 1)
+
+```
+```{r}
+ggplot(model1_results, aes(sample = .resid)) +
+  stat_qq() +
+  stat_qq_line()
+
+ggplot(model2a_results, aes(sample = .resid)) +
+  stat_qq() +
+  stat_qq_line()
+OR
+
+p3 <- ggplot(model1_results, aes(sample = .resid)) +
+  stat_qq() +
+  stat_qq_line()+
+  ylab("Residuals")+
+  ggtitle("Normal Q-Q")+
+  theme_bw()# try also look at the std residuals (.std.resid). Left: model 1
+p4 <- ggplot(model2a_results, aes(sample = .resid)) +
+  stat_qq() +
+  stat_qq_line()# Right: model 2
+gridExtra::grid.arrange(p3, p4, nrow = 1)
+
+```
+In our case we have a little deviation in the bottom left-hand side which likely is the concern we mentioned earlier that as the reduction amount approaches 0 the relationship with payment amount appears to start veering away from a linear relationship. 
+
+### Cook’s Distance and residuals versus leverage plot for model1
+```{r}
+ggplot(model1_results, aes(seq_along(.cooksd), .cooksd))+
+  geom_bar(stat="identity", position="identity")+
+  xlab("Obs. Number")+
+  ylab("Cook's distance")+
+  ggtitle("Cook's distance")+
+  theme_bw()
+    
+ggplot(model1_results, aes(.hat, .std.resid))+
+  geom_point(aes(size=.cooksd), na.rm=TRUE)+
+  stat_smooth(method="loess", na.rm=TRUE)+
+  xlab("Leverage")+
+  ylab("Standardized Residuals")+
+  ggtitle("Residual vs Leverage Plot")+
+  scale_size_continuous("Cook's Distance", range=c(1,5))+
+  theme_bw()+
+  theme(legend.position="bottom")
+    
+ggplot(model1_results, aes(.hat, .cooksd))+
+  geom_point(na.rm=TRUE)+
+  stat_smooth(method="loess", na.rm=TRUE)+
+  xlab("Leverage hii")+
+  ylab("Cook's Distance")+
+  ggtitle("Cook's dist vs Leverage hii/(1-hii)")+
+  geom_abline(slope=seq(0,3,0.5), color="gray", linetype="dashed")+
+  theme_bw()
+```
+### Cook’s Distance and residuals versus leverage plot for model2
+```{r}
+ggplot(model2a_results, aes(seq_along(.cooksd), .cooksd))+
+  geom_bar(stat="identity", position="identity")+
+  xlab("Obs. Number")+
+  ylab("Cook's distance")+
+  ggtitle("Cook's distance")+
+  theme_bw()
+    
+ggplot(model2a_results, aes(.hat, .std.resid))+
+  geom_point(aes(size=.cooksd), na.rm=TRUE)+
+  stat_smooth(method="loess", na.rm=TRUE)+
+  xlab("Leverage")+
+  ylab("Standardized Residuals")+
+  ggtitle("Residual vs Leverage Plot")+
+  scale_size_continuous("Cook's Distance", range=c(1,5))+
+  theme_bw()+
+  theme(legend.position="bottom")
+    
+ggplot(model2a_results, aes(.hat, .cooksd))+
+  geom_point(na.rm=TRUE)+
+  stat_smooth(method="loess", na.rm=TRUE)+
+  xlab("Leverage hii")+
+  ylab("Cook's Distance")+
+  ggtitle("Cook's dist vs Leverage hii/(1-hii)")+
+  geom_abline(slope=seq(0,3,0.5), color="gray", linetype="dashed")+
+  theme_bw()
+
+```
+### top 5 observations with the highest Cook’s distance
+```{r}
+model1_results %>%
+  top_n(5, wt = .cooksd)
+
+model2a_results %>%
+  top_n(5, wt = .cooksd)
+```
+### Making Predictions
+We can compare the test sample MSE to the training sample MSE with the following. 
+```{r}
+
+test %>% 
+  add_predictions(model1) %>%
+  summarise(MSE = mean((payment_amount - pred)^2))# test MSE
+
+train %>% 
+  add_predictions(model1) %>%
+  summarise(MSE = mean((payment_amount - pred)^2))# training MSE
+
+```
+we can see that MSE value for train model is 779.51 which is lower compared to test model with 1083.3. Hence, train model is more preferred for model1.
+```{r}
+test %>% 
+  add_predictions(model2a) %>%
+  summarise(MSE = mean((payment_amount - pred)^2))# test MSE
+
+train %>% 
+  add_predictions(model2a) %>%
+  summarise(MSE = mean((payment_amount - pred)^2))# training MSE
+```
+we can see that MSE value for train model is 860.8532 which is lower compared to test model with 1232.3 Hence, train model is also preferred for model2a.
+### compare MSE on test and train data
+```{r}
+test %>%
+  gather_predictions(model1, model2a) %>%
+  group_by(model) %>%
+  summarise(MSE = mean((payment_amount-pred)^2))
+
+train %>%
+  gather_predictions(model1, model2a) %>%
+  group_by(model) %>%
+  summarise(MSE = mean((payment_amount-pred)^2))
+```
+Here we see that model 1 drastically reduces MSE on the out-of-sample. So although we still have lingering concerns over residual normality model 1 is still the preferred model so far.
+
+
+
+
+
+
